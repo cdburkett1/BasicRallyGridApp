@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Defect Counts by Release</title>
+
+    <script type="text/javascript" src="/apps/2.0rc1/sdk.js"></script>
+
+    <script type="text/javascript">
+        Rally.onReady(function () {
+                Ext.define('CustomApp', {
+    extend: 'Rally.app.App',
+    componentCls: 'app',
+    items: [
+        {
+            layout: 'hbox',
+            border: false,
+            items: [
+                // Re-enable this code to allow for a release dropdown selector within the app
+               /*{
+                    xtype: 'container',
+                    itemId: 'releaseDropDown',
+                    columnWidth: 1
+                },*/
+                {
+                    xtype: 'container',
+                    itemId: 'chart1',
+                    flex: 1
+                },
+                {
+                    xtype: 'container',
+                    itemId: 'chart2',
+                    flex: 1
+                }
+            ]
+        },
+        {
+            layout: 'hbox',
+            border: false,
+            items: [
+                {
+                    xtype: 'component',
+                    itemId: 'text1',
+                    html: '<div style="float:left; clear:both; width:600px"><p><b>Release Defects by State</b> displays counts of all defects in the release based on their current state.</p></div>'
+                },
+                {
+                    xtype: 'component',
+                    itemId: 'text2',
+                    html: '<div style="float:left; clear:both; width:600px"><p><b>Current Active Defects by Priority</b> takes all active (not in a closed state) defects for the current release and displays counts of those defects based on priority.</p></div>'
+                }
+            ]
+        }
+    ],
+    launch: function() {
+        
+        // Re-enable this code to allow for a release dropdown selector within the app
+        /*// add the release dropdown selector
+        this.down("#releaseDropDown").add( {
+            xtype: 'rallyreleasecombobox',
+            itemId : 'releaseSelector',
+            listeners: {
+                    select: this._onReleaseSelect,
+                    ready: this._onReleaseSelect,
+                    scope: this
+            }
+        });*/
+        
+        
+        // Used to access the page-level release combo box
+        // Can eliminate this block if using an app-level combo box
+        this.relCB = window.parent.Ext4.ComponentQuery.query('rallyreleasecombobox')[0];
+        this.relCB.on({
+            select: this._onReleaseSelect,
+            ready: this._onReleaseSelect,
+            scope: this
+        });
+        this._onReleaseSelect();
+    },
+    
+    // called when a release is selected.
+    _onReleaseSelect : function() {  
+        // Re-enable this code to allow for a release dropdown selector within the app
+        // var value =  this.down('#releaseSelector').getRecord()
+        
+        // used to save the selected release
+        this.gRelease = null;
+        // get and save the selected release
+        var value = this.relCB.getRecord(); // disable this line if you are using a release combo box in the app
+        this.gRelease = value.data.ObjectID;
+        
+        var that = this;
+        
+        // Retrieve all defects in the selected release
+        Ext.create('Rally.data.WsapiDataStore', {
+            model: "Defect",
+            autoLoad: true,
+            listeners: {
+                load: that._aggregateData,
+                scope: that
+            },
+            fetch: ['ObjectID','Name', 'State', 'Release', 'Priority'],
+            hydrate: ['State'],
+            filters: [
+                {
+                    property: 'Release.ObjectID',
+                    value: that.gRelease
+                }
+            ]
+        });
+        
+    },
+    
+    // Produce counts of defects by state and non-closed defects by priority
+    _aggregateData : function(store, data, success) {
+        var that = this;
+        var stateData = [];
+        var priorityData = [];
+        var states = ['Submitted', 'Open', 'Re-opened', 'Test-Dev', 'Test-QA', 'Closed'];
+        var priorities = ['Critical', 'High', 'Medium', 'Low', 'None'];
+        var colors = ['#f68d86', '#ea9861', '#ead960', '#88c197', '#7daed5', '#c188b2'];
+        
+        for (var i = 0; i < states.length; i++) {
+            stateData.push({
+               name: states[i],
+               y: 0,
+               color: colors[i]
+            });
+        }
+        
+        for (var j = 0; j < priorities.length; j++) {
+                priorityData.push({
+                   name: priorities[j],
+                   y: 0,
+                   color: colors[j]
+                });
+            }
+        
+        // Generate counts of each defect by state, and each non-closed defect by priority
+        _.each(data, function(d) {
+            ++stateData[_.indexOf(states, d.data.State)].y;
+            
+            if (d.data.State !== "Closed") {
+                ++priorityData[_.indexOf(priorities, d.data.Priority)].y;
+            }
+        });
+        
+        that._showCharts(stateData, priorityData);
+    },
+    
+    
+    _showCharts: function(stateData, priorityData) {
+        var that = this;
+        var chart1 = this.down("#chart1");
+        var chart2 = this.down("#chart2");
+        chart1.removeAll();
+        chart2.removeAll();
+        
+        var totalDefects = 0;
+        var totalActiveDefects = 0;
+        
+        for (var i = 0; i < stateData.length; i++) {
+            totalDefects += stateData[i].y;
+        }
+        
+        for (var j = 0; j < priorityData.length; j++) {
+            totalActiveDefects += priorityData[j].y;
+        }
+        
+        var extChart1 = Ext.create('Rally.ui.chart.Chart', {
+            width: 600,
+            height: 400,
+            chartData: {
+                series: [{
+                    type: 'pie',
+                    name: 'Defect Count',
+                    data: stateData
+                }]
+            },
+            chartConfig: {
+                chart: {
+                    plotBackgroundColor: null,
+                    plotBorderWidth: null,
+                    plotShadow: false
+                },
+                title: {
+                    text: 'Release Defects by State',
+                    style: {
+                        color: '#000000'
+                    }
+                },
+                subtitle: {
+                    text: 'Total Defects: ' + totalDefects,
+                    style: {
+                        color: '#000000'
+                    }
+                },
+                tooltip: {
+                    pointFormat: '{series.name}: <b>{point.y}</b>'
+                },
+                plotOptions: {
+                    pie: {
+                        allowPointSelect: false,
+                        cursor: 'pointer',
+                        dataLabels: {
+                            enabled: true,
+                            useHTML: true,
+                            color: '#000000',
+                            connectorColor: '#000000',
+                            formatter: function() {
+                                //Hide the labels for empty pie slices
+                                if (this.y === 0)
+                                {
+                                    return null;
+                                }
+                                return '<div><b>' + this.point.name + '</b>: ' + this.y + '</div>';
+                            }
+                        },
+                        point: {
+                            events: {
+                                click: function(event) {
+                                    var pointRef = this;
+                                    // Retrieve all defects in the selected release
+                                    Ext.create('Rally.data.WsapiDataStore', {
+                                        model: "Defect",
+                                        autoLoad: true,
+                                        listeners: {
+                                            load: function(store, data, success) {
+                                                var text = '';
+                                                _.each(data, function(d) {
+                                                   text += '<a href="' + Ext.String.format('https://rally1.rallydev.com/#/detail{0}', d.data._ref) + '" target="_blank">' + d.data.FormattedID + '</a>: ' + d.data.Name + '<br />';
+                                                });
+                                                var win;
+                                                if (!win) {
+                                                    var form = Ext.widget('form', {
+                                                        autoScroll: true,
+                                                        layout: {
+                                                            type: 'vbox',
+                                                            aligh: 'stretch'
+                                                        },
+                                                        border: false,
+                                                        bodyPadding: 10,
+                                                        fieldDefaults: {
+                                                            labelAlign: 'top',
+                                                            labelWidth: 100,
+                                                            labelStyle: 'font-weight:bold'
+                                                        },
+                                                        items: [
+                                                            {
+                                                                xtype: 'displayfield',
+                                                                value: text
+                                                            }
+                                                        ]
+                                                    });
+                                                    
+                                                    var pointName = pointRef.name;
+                                                    if (pointName === '') {
+                                                        pointName = "Not Specified";
+                                                    }
+                                                    win = Ext.widget('window', {
+                                                        title: 'Defects with State: <b>' + pointName + '</b>',
+                                                        closeAction: 'hide',
+                                                        width: 800,
+                                                        height: 400,
+                                                        layout: 'fit',
+                                                        resizable: true,
+                                                        modal: true,
+                                                        items: form
+                                                    });
+                                                }
+                                                win.show();
+                                            },
+                                            scope: that
+                                        },
+                                        fetch: ['ObjectID','Name', 'Release', 'State', 'FormattedID', '_ref'],
+                                        filters: [
+                                            {
+                                                property: 'Release.ObjectID',
+                                                value: that.gRelease
+                                            },
+                                            {
+                                                property: 'State',
+                                                value: this.name
+                                            }
+                                        ]
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        var extChart2 = Ext.create('Rally.ui.chart.Chart', {
+            width: 600,
+            height: 400,
+            chartData: {
+                series: [{
+                    type: 'pie',
+                    name: 'Defect Count',
+                    data: priorityData
+                }]
+            },
+            chartConfig: {
+                chart: {
+                    plotBackgroundColor: null,
+                    plotBorderWidth: null,
+                    plotShadow: false
+                },
+                title: {
+                    text: 'Current Active Defects by Priority',
+                    style: {
+                        color: '#000000'
+                    }
+                },
+                subtitle: {
+                    text: 'Total Active Defects: ' + totalActiveDefects,
+                    style: {
+                        color: '#000000'
+                    }
+                },
+                tooltip: {
+                    pointFormat: '{series.name}: <b>{point.y}</b>'
+                },
+                plotOptions: {
+                    pie: {
+                        allowPointSelect: false,
+                        cursor: 'pointer',
+                        dataLabels: {
+                            enabled: true,
+                            useHTML: true,
+                            color: '#000000',
+                            connectorColor: '#000000',
+                            formatter: function() {
+                                //Hide the labels for empty pie slices
+                                if (this.y === 0)
+                                {
+                                    return null;
+                                }
+                                return '<div><b>' + this.point.name + '</b>: ' + this.y + '</div>';
+                            }
+                        },
+                        point: {
+                            events: {
+                                click: function(event) {
+                                    var pointRef = this;
+                                    // Retrieve all defects in the selected release
+                                    Ext.create('Rally.data.WsapiDataStore', {
+                                        model: "Defect",
+                                        autoLoad: true,
+                                        listeners: {
+                                            load: function(store, data, success) {
+                                                var text = '';
+                                                _.each(data, function(d) {
+                                                   text += '<a href="' + Ext.String.format('https://rally1.rallydev.com/#/detail{0}', d.data._ref) + '" target="_blank">' + d.data.FormattedID + '</a>: ' + d.data.Name + '<br />';
+                                                });
+                                                var win;
+                                                if (!win) {
+                                                    var form = Ext.widget('form', {
+                                                        autoScroll: true,
+                                                        layout: {
+                                                            type: 'vbox',
+                                                            aligh: 'stretch'
+                                                        },
+                                                        border: false,
+                                                        bodyPadding: 10,
+                                                        fieldDefaults: {
+                                                            labelAlign: 'top',
+                                                            labelWidth: 100,
+                                                            labelStyle: 'font-weight:bold'
+                                                        },
+                                                        items: [
+                                                            {
+                                                                xtype: 'displayfield',
+                                                                value: text
+                                                            }
+                                                        ]
+                                                    });
+                                                    
+                                                    var pointName = pointRef.name;
+                                                    if (pointName === '') {
+                                                        pointName = "Not Specified";
+                                                    }
+                                                    win = Ext.widget('window', {
+                                                        title: 'Defects with Priority: <b>' + pointName + '</b>',
+                                                        closeAction: 'hide',
+                                                        width: 800,
+                                                        height: 400,
+                                                        layout: 'fit',
+                                                        resizable: true,
+                                                        modal: true,
+                                                        items: form
+                                                    });
+                                                }
+                                                win.show();
+                                            },
+                                            scope: that
+                                        },
+                                        fetch: ['ObjectID','Name', 'Release', 'Priority', 'State', 'FormattedID', '_ref'],
+                                        filters: [
+                                            {
+                                                property: 'Release.ObjectID',
+                                                value: that.gRelease
+                                            },
+                                            {
+                                                property: 'Priority',
+                                                value: this.name
+                                            },
+                                            {
+                                                property: 'State',
+                                                operator: '!=',
+                                                value: 'Closed'
+                                            }
+                                        ]
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+        
+        chart1.add(extChart1);
+        chart2.add(extChart2);
+        
+        // This block is a way to prevent a spinning "loading" icon and mask above the chart
+        // Appears to be an artifact from Ext JS
+        var p = Ext.get(chart1.id);
+        var elems = p.query("div.x-mask");
+        _.each(elems, function(e) { e.remove(); });
+        elems = p.query("div.x-mask-msg");
+        _.each(elems, function(e) { e.remove(); });
+        
+        p = Ext.get(chart2.id);
+        elems = p.query("div.x-mask");
+        _.each(elems, function(e) { e.remove(); });
+        elems = p.query("div.x-mask-msg");
+        _.each(elems, function(e) { e.remove(); });
+    }            
+});
+
+            Rally.launchApp('CustomApp', {
+                name:"Defect Counts by Release",
+	            parentRepos:"cdburkett1/defects-by-state"
+            });
+
+        });
+    </script>
+
+
+    <style type="text/css">
+        .app {
+}
+
+    </style>
+</head>
+<body></body>
+</html>
+
